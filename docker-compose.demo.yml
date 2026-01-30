@@ -1,0 +1,57 @@
+services:
+  chat-server:
+    image: cpp-chat-server
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    volumes:
+      - ./data/demo/users.json:/app/data/users.json
+      - ./data/demo/chat_history.json:/app/data/chat_history.json
+    environment:
+      - PORT=9000
+    ports:
+      - "9000:9000"
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 5 bash -c \"printf '' | openssl s_client -connect 127.0.0.1:${PORT:-9000} -servername localhost >/dev/null 2>&1\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  client-one:
+    image: cpp-chat-client
+    build:
+      context: .
+      dockerfile: Dockerfile.client
+    depends_on:
+      chat-server:
+        condition: service_healthy
+    environment:
+      - SERVER_HOST=chat-server
+      - SERVER_PORT=9000
+      - AUTO_RUN=1
+      - CLIENT_USERNAME=Alice
+      - CLIENT_PASSWORD=AlicePass1!
+      - CLIENT_FRIEND=Bob
+      - CLIENT_MESSAGE=Hello from Alice
+    stdin_open: true
+    tty: true
+
+  client-two:
+    image: cpp-chat-client
+    build:
+      context: .
+      dockerfile: Dockerfile.client
+    depends_on:
+      chat-server:
+        condition: service_healthy
+    environment:
+      - SERVER_HOST=chat-server
+      - SERVER_PORT=9000
+      - AUTO_RUN=1
+      - CLIENT_USERNAME=Bob
+      - CLIENT_PASSWORD=BobPass1!
+      - CLIENT_FRIEND=Alice
+      - CLIENT_MESSAGE=Hello from Bob
+    stdin_open: true
+    tty: true

@@ -1,0 +1,40 @@
+FROM debian:bookworm AS build
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    pkg-config \
+    libssl-dev \
+    libsodium-dev \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY . .
+
+RUN rm -rf build \
+    && cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DENABLE_SANITIZERS=OFF -DBUILD_TESTING=OFF \
+    && cmake --build build --target server
+
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libssl3 \
+    libsodium23 \
+    ca-certificates \
+    openssl \
+    bash \
+    coreutils \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY --from=build /app/build/server /app/server
+COPY config/cert.pem config/key.pem /app/config/
+COPY data/users.json data/chat_history.json /app/data/
+COPY docker/server-entrypoint.sh /app/server-entrypoint.sh
+
+HEALTHCHECK --interval=10s --timeout=5s --retries=5 CMD timeout 5 bash -c "printf '' | openssl s_client -connect 127.0.0.1:${PORT:-9000} -servername localhost >/dev/null 2>&1" || exit 1
+
+EXPOSE 9000
+ENTRYPOINT ["/app/server-entrypoint.sh"]

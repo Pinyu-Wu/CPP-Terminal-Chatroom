@@ -1,0 +1,16 @@
+services:
+  chat-server:
+    image: cpp-chat-server
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    environment:
+      - PORT=9000
+    ports:
+      - "9000:9000"
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 5 bash -c \"printf '' | openssl s_client -connect 127.0.0.1:${PORT:-9000} -servername localhost >/dev/null 2>&1\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped

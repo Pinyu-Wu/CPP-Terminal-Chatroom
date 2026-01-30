@@ -1,0 +1,75 @@
+#!/usr/bin/env expect -f
+
+set timeout 30
+
+if {$argc < 6} {
+    puts "Usage: auto_chat.expect <server_host> <server_port> <username> <password> <friend> <message>"
+    exit 1
+}
+
+set server   [lindex $argv 0]
+set port     [lindex $argv 1]
+set username [lindex $argv 2]
+set password [lindex $argv 3]
+set friend   [lindex $argv 4]
+set message  [lindex $argv 5]
+
+spawn /app/client $server $port
+
+expect ">> "
+send -- "2\r"
+
+expect "Username:"
+send -- "$username\r"
+
+expect "Password:"
+send -- "$password\r"
+
+expect {
+    -re "logged in" {}
+    -re "successful" {}
+    timeout { exit 1 }
+}
+
+expect ">> "
+after 1000
+set added 0
+set attempts 0
+while {$attempts < 5 && !$added} {
+    send -- "/addfriend $friend\r"
+    expect {
+        -re "You added" { set added 1 }
+        -re "already your friend" { set added 1 }
+        -re "not found" { after 1000 }
+        timeout { after 1000 }
+    }
+    incr attempts
+}
+if {!$added} {
+    puts "Failed to add friend after retries"
+    exit 1
+}
+
+expect ">> "
+send -- "/chat $friend\r"
+
+expect {
+    -re "Entering chat with" {}
+    -re "Cannot chat" { exit 1 }
+    timeout { exit 1 }
+}
+
+expect -re "To $friend:? >> "
+send -- "$message\r"
+
+expect {
+    -re "\\] ${friend}: " {}
+    timeout { }
+}
+expect -re "To $friend:? >> "
+send -- "/exit\r"
+
+expect ">> "
+send -- "/exit\r"
+
+expect eof
