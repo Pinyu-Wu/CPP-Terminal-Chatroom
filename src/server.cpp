@@ -20,6 +20,7 @@
 #include <errno.h>
 #include <chrono>
 #include <cstdint>
+#include <atomic>
 
 #include "UserManager.hpp"
 #include "ChatManager.hpp"
@@ -58,6 +59,9 @@ namespace
     constexpr const char *CHAT_HISTORY_PATH = "data/chat_history.json";
     constexpr const char *CERT_PATH = "config/cert.pem";
     constexpr const char *KEY_PATH = "config/key.pem";
+
+    constexpr std::uint32_t CHAT_SAVE_THRESHOLD = 30;
+    constexpr std::chrono::seconds CHAT_SAVE_INTERVAL = std::chrono::seconds(20);
 }
 
 UserManager userManager;
@@ -68,6 +72,10 @@ std::mutex session_mutex; // Guards active_sessions and user_to_socket.
 std::mutex user_mutex;    // Serializes access to userManager.
 
 Metrics metrics;
+
+std::atomic<std::uint32_t> chat_messages_since_flush{0};
+std::atomic<long long> chat_last_flush_ms{0};
+std::atomic<bool> chat_flush_pending{false};
 
 // Rate limiters for general and auth-only requests.
 RateLimiter requestLimiter(20, std::chrono::seconds(1));
@@ -111,6 +119,13 @@ static void force_test_crash()
     *ptr = 1; // Intentional SIGSEGV for crash testing.
 }
 #endif
+
+static inline long long steady_ms_now()
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
 
 static void enqueue_response(int fd, const json &j);
 static void send_disconnect(SSL *ssl, const char *error, const char *message)
@@ -357,6 +372,7 @@ static void process_request(int fd, const json &request)
 {
     std::string username;
     bool authenticated = false;
+    nlohmann::json request_extra = nlohmann::json::object();
     {
         std::lock_guard<std::mutex> lock(connections_mutex);
         auto it = connections.find(fd);
@@ -388,6 +404,13 @@ static void process_request(int fd, const json &request)
             extra["user"] = username;
         if (!error_code.empty())
             extra["error"] = error_code;
+        if (!request_extra.empty())
+        {
+            for (auto it = request_extra.begin(); it != request_extra.end(); ++it)
+            {
+                extra[it.key()] = it.value();
+            }
+        }
 
         Logger::log_event(status == "success" ? LogLevel::Info : LogLevel::Warn,
                           "request", "Handled request", extra);
@@ -488,6 +511,10 @@ static void process_request(int fd, const json &request)
             }
             else
             {
+                if (msg.rfind("TEST_", 0) == 0)
+                {
+                    request_extra["request_message"] = msg;
+                }
                 json payload;
                 payload["action"] = "echo";
                 payload["message"] = msg;
@@ -589,7 +616,40 @@ static void process_request(int fd, const json &request)
         delivery["timestamp"] = current_timestamp();
 
         chatManager.addMessage(username, target, username, content);
-        chatManager.saveToFile(CHAT_HISTORY_PATH);
+        const long long now_ms = steady_ms_now();
+        bool should_flush = false;
+        std::uint32_t prior = chat_messages_since_flush.fetch_add(1, std::memory_order_relaxed);
+        if (prior + 1 >= CHAT_SAVE_THRESHOLD)
+        {
+            chat_messages_since_flush.store(0, std::memory_order_relaxed);
+            chat_last_flush_ms.store(now_ms, std::memory_order_relaxed);
+            should_flush = true;
+        }
+        else
+        {
+            long long last_ms = chat_last_flush_ms.load(std::memory_order_relaxed);
+            if (now_ms - last_ms >=
+                std::chrono::duration_cast<std::chrono::milliseconds>(CHAT_SAVE_INTERVAL).count())
+            {
+                long long expected = last_ms;
+                if (chat_last_flush_ms.compare_exchange_strong(
+                        expected, now_ms, std::memory_order_relaxed))
+                {
+                    chat_messages_since_flush.store(0, std::memory_order_relaxed);
+                    should_flush = true;
+                }
+            }
+        }
+
+        if (should_flush)
+        {
+            bool expected = false;
+            if (chat_flush_pending.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
+            {
+                chatManager.saveToFile(CHAT_HISTORY_PATH);
+                chat_flush_pending.store(false, std::memory_order_release);
+            }
+        }
 
         // Deliver immediately if the target is online.
         int target_fd = -1;
@@ -658,6 +718,10 @@ int main(int argc, char *argv[])
     {
         std::cerr << "Failed to load " << CHAT_HISTORY_PATH << "\n";
     }
+    chat_last_flush_ms.store(steady_ms_now(), std::memory_order_relaxed);
+    std::atexit([]() {
+        chatManager.saveToFile(CHAT_HISTORY_PATH);
+    });
     if (sodium_init() < 0)
     {
         std::cerr << "Failed to init libsodium\n";

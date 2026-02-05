@@ -21,9 +21,14 @@ std::vector<Message> ChatManager::getHistory(const std::string& user1, const std
 }
 
 void ChatManager::saveToFile(const std::string& filename) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    // Snapshot under lock to minimize time holding the mutex.
+    std::unordered_map<std::string, std::vector<Message>> snapshot;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        snapshot = history_;
+    }
     json j;
-    for (const auto& [key, msgs] : history_) {
+    for (const auto& [key, msgs] : snapshot) {
         for (const auto& m : msgs) {
             j[key].push_back(m.to_json());
         }

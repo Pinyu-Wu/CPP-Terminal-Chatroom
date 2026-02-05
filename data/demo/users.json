@@ -1,1 +1,14 @@
-{}
+{
+    "Alice": {
+        "friends": [
+            "Bob"
+        ],
+        "password": "$argon2id$v=19$m=262144,t=3,p=1$wo1hn3ZkI6IGu+5UiShgmQ$XBYz/jVk96qLp+lqn8v78iLX8ehpG+2HCgiPDikb03Q"
+    },
+    "Bob": {
+        "friends": [
+            "Alice"
+        ],
+        "password": "$argon2id$v=19$m=262144,t=3,p=1$Z/zVm1bv/KHTUBkDqwCNrg$s4HPAedbVlwXDh4nqkDz5vYrw7hQtWi8ZJY6sFMU6Pw"
+    }
+}

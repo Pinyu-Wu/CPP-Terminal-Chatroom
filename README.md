@@ -75,6 +75,35 @@ cmake --build build-tsan
 TSAN_OPTIONS=halt_on_error=1 ctest --test-dir build-tsan --output-on-failure
 ```
 
+### Integration Test (paired chat)
+This integration test spins up many TLS clients, sends paired messages, and analyzes server metrics from the JSONL log.
+Metrics reported by `scripts/analyze_metrics.py`:
+- `Test duration`: wall-clock seconds covered by the selected log window.
+- `Average QPS` and `Peak QPS`: derived from `metrics_dump` entries in the server log (if present).
+- `Per-action count / p50 / p95 / p99`: per-request action totals and latency percentiles, also from `metrics_dump`.
+- `Error rate`: percentage of non-`success` statuses among request logs in the selected window.
+
+Local run:
+1. Build the server binary:
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DENABLE_SANITIZERS=OFF -DBUILD_TESTING=OFF
+cmake --build build --target server
+```
+2. Start the server and capture logs:
+```bash
+mkdir -p logs
+./build/server 9000 > logs/server.jsonl 2> logs/server.err
+```
+3. Run the paired test:
+```bash
+python3 scripts/paired_chat_test.py --host 127.0.0.1 --port 9000 --pairs 30 --rounds 30 --interval 1 --run-id demo-001
+```
+4. Analyze metrics:
+```bash
+python3 scripts/analyze_metrics.py --log logs/server.jsonl --run-id demo-001
+```
+5. Stop the server when finished (Ctrl+C in the server terminal).
+
 ## Run (local)
 1) Start the server (listens on the given port):
 ```bash
@@ -106,6 +135,13 @@ Server runs on `localhost:9000` by default. Set `PORT` to override.
 docker compose -f docker-compose.demo.yml up --build
 ```
 Demo uses `data/demo/` as volume-mounted seed data and auto-runs scripted clients.
+
+### Integration Test (paired chat, one command)
+This runs the server in one container and the test+analysis in another, sharing `./logs` via a volume.
+```bash
+docker compose -f docker-compose.test.yml up --build --abort-on-container-exit --exit-code-from test-runner
+```
+Logs are written to `logs/server.jsonl` and `logs/server.err` on the host.
 
 ### Useful environment variables
 - Server: `PORT`

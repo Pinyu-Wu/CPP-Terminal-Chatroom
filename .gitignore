@@ -2,3 +2,4 @@ build/
 docs/
 *.d
 *.o
+.DS_Store

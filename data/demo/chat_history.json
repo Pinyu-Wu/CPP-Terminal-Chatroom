@@ -1,1 +1,14 @@
-{}
+{
+    "Alice#Bob": [
+        {
+            "content": "Hello from Bob",
+            "from": "Bob",
+            "timestamp": "2026-01-30 12:50:48"
+        },
+        {
+            "content": "Hello from Alice",
+            "from": "Alice",
+            "timestamp": "2026-01-30 12:50:48"
+        }
+    ]
+}

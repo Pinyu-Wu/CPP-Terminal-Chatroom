@@ -1,0 +1,41 @@
+services:
+  chat-server:
+    image: cpp-chat-server
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    environment:
+      - PORT=9000
+    ports:
+      - "9000:9000"
+    volumes:
+      - ./logs:/app/logs
+    entrypoint:
+      - /bin/bash
+      - -lc
+      - mkdir -p /app/logs; /app/server-entrypoint.sh > /app/logs/server.jsonl 2> /app/logs/server.err
+    restart: "no"
+
+  test-runner:
+    image: python:3.11-slim
+    depends_on:
+      chat-server:
+        condition: service_healthy
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+      - ./logs:/workspace/logs
+    environment:
+      - HOST=chat-server
+      - PORT=9000
+      - PAIRS=150
+      - ROUNDS=150
+      - INTERVAL=2
+      - RUN_ID=demo-001
+    command:
+      - sh
+      - -lc
+      - |
+        mkdir -p logs
+        python3 scripts/paired_chat_test.py --host "$${HOST}" --port "$${PORT}" --pairs "$${PAIRS}" --rounds "$${ROUNDS}" --interval "$${INTERVAL}" --run-id "$${RUN_ID}"
+        python3 scripts/analyze_metrics.py --log logs/server.jsonl --run-id "$${RUN_ID}"
